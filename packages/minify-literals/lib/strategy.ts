@@ -1,6 +1,7 @@
 import CleanCSS from "clean-css";
 import { type Options as HTMLOptions, minify } from "html-minifier-terser";
 import type { TemplatePart } from "parse-literals";
+import { randomBytes, randomInt } from "node:crypto";
 
 /**
  * A strategy on how to minify HTML and optionally CSS.
@@ -20,7 +21,7 @@ export interface Strategy<O = any, C = any> {
 	 * @param parts the parts to get a placeholder for
 	 * @returns the placeholder
 	 */
-	getPlaceholder(parts: TemplatePart[]): string;
+	getPlaceholder(parts: TemplatePart[], tag?: string): string | string[];
 	/**
 	 * Combines the parts' HTML text strings together into a single string using
 	 * the provided placeholder. The placeholder indicates where a template
@@ -30,7 +31,7 @@ export interface Strategy<O = any, C = any> {
 	 * @param placeholder the placeholder to use between parts
 	 * @returns the combined parts' text strings
 	 */
-	combineHTMLStrings(parts: TemplatePart[], placeholder: string): string;
+	combineHTMLStrings(parts: TemplatePart[], placeholder: string | string[]): string;
 	/**
 	 * Minfies the provided HTML string.
 	 *
@@ -56,7 +57,7 @@ export interface Strategy<O = any, C = any> {
 	 * @param placeholder the placeholder to split by
 	 * @returns an array of html strings
 	 */
-	splitHTMLByPlaceholder(html: string, placeholder: string): string[];
+	splitHTMLByPlaceholder(html: string, placeholder: string | string[]): string[];
 }
 
 /**
@@ -89,7 +90,87 @@ export const defaultMinifyOptions: HTMLOptions = {
  * <code>clean-css</code> to minify CSS.
  */
 export const defaultStrategy: Strategy<HTMLOptions, CleanCSS.Options> = {
-	getPlaceholder(parts) {
+	getPlaceholder(parts, tag) {
+		const isCss = tag?.toLowerCase().includes("css");
+		if (isCss) {
+			// use strict mode to avoid issues with CSS minification
+			const random = `tmp_${randomBytes(6).toString("hex")}`;
+			const placeholder: string[] = [];
+			const comment = /\/\*[\s\S]*?\*\//g;
+			for (let i = 1; i < parts.length; i++) {
+				const beforeFull = parts[i - 1]!.text;
+				const beforeCss = beforeFull.replace(comment, "");
+				const afterFull = parts[i]!.text;
+				const afterCss = afterFull.replace(comment, "");
+				/**
+				 * 1. selector
+				 * ${selector} {
+				 * }
+				 *
+				 * 2. key
+				 * selector {
+				 * 	 ${key}: value;
+				 * }
+				 *
+				 * 3. rule
+				 * [selector {}]
+				 * ${rule}
+				 * [selector {}]
+				 *
+				 * 4. number-literal
+				 * selector{
+				 *   key: ${param}px;
+				 * }
+				 *
+				 * 5. value
+				 * selector {
+				 * 	 key: ${value};
+				 * 	 key: ${value}
+				 * }
+				 *
+				 * 6. param
+				 * selector{
+				 *   key: fun(${param}[, ${param}]);
+				 * }
+				 */
+
+				const isSelector = /^\s*\{/.test(afterCss);
+				if (isSelector) {
+					placeholder.push(`#${random}`);
+					continue;
+				}
+				const isKey = /^\s*:/.test(afterCss);
+				if (isKey) {
+					placeholder.push(`--${random}`);
+					continue;
+				}
+				const isRule = /\}\s*$/.test(beforeCss) || beforeCss.trim().length === 0;
+				if (isRule) {
+					return `@${random}();`;
+				}
+				const isUnit = /^\w+/.test(afterCss);
+				if (isUnit) {
+					let num: string;
+					while (true) {
+						num = `${randomInt(281474976710655)}`;
+						if (!beforeFull.includes(num)) {
+							break;
+						}
+					}
+					placeholder.push(num);
+					continue;
+				}
+				const isValue = /:\s*$/.test(beforeCss);
+				if (isValue) {
+					placeholder.push(`var(--${random})`);
+					continue;
+				}
+
+				// isParams
+				placeholder.push(`var(--${random})`);
+			}
+			return placeholder;
+		}
 		// Using @ and (); will cause the expression not to be removed in CSS.
 		// However, sometimes the semicolon can be removed (ex: inline styles).
 		// In those cases, we want to make sure that the HTML splitting also
@@ -104,7 +185,10 @@ export const defaultStrategy: Strategy<HTMLOptions, CleanCSS.Options> = {
 	},
 
 	combineHTMLStrings(parts, placeholder) {
-		return parts.map((part) => part.text).join(placeholder);
+		if (typeof placeholder === "string") {
+			return parts.map((part) => part.text).join(placeholder);
+		}
+		return parts.map((part, i) => part.text + (placeholder[i] ?? "")).join("");
 	},
 
 	async minifyHTML(html, options = {}) {
@@ -194,13 +278,30 @@ export const defaultStrategy: Strategy<HTMLOptions, CleanCSS.Options> = {
 		return output.styles;
 	},
 	splitHTMLByPlaceholder(html, placeholder) {
-		const parts = html.split(placeholder);
-		// Make the last character (a semicolon) optional. See above.
-		if (placeholder.endsWith(";")) {
-			const withoutSemicolon = placeholder.substring(0, placeholder.length - 1);
-			for (let i = parts.length - 1; i >= 0; i--) {
-				parts.splice(i, 1, ...(parts[i]?.split(withoutSemicolon) ?? []));
+		let parts: string[];
+		if (typeof placeholder === "string") {
+			parts = html.split(placeholder);
+			// Make the last character (a semicolon) optional. See above.
+			if (placeholder.endsWith(";")) {
+				const withoutSemicolon = placeholder.substring(0, placeholder.length - 1);
+				for (let i = parts.length - 1; i >= 0; i--) {
+					parts.splice(i, 1, ...(parts[i]?.split(withoutSemicolon) ?? []));
+				}
 			}
+		} else {
+			parts = [];
+			// strice mode
+			let pos = 0;
+			let index = -1;
+			for (const ph of placeholder) {
+				index = html.indexOf(ph, pos);
+				if (index === -1) {
+					throw new Error(`placeholder ${ph} not found in html ${html}`);
+				}
+				parts.push(html.slice(pos, index));
+				pos = index + ph.length;
+			}
+			parts.push(html.slice(pos));
 		}
 
 		return parts;

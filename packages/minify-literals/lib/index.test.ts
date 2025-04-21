@@ -12,11 +12,68 @@ import {
 } from "./";
 import { defaultMinifyOptions, defaultStrategy } from "./strategy";
 
+/**
+ * get code snippet from function body
+ */
+const fn_body = (fn: Function, tabSize = 2) => {
+	const fn_str = fn.toString();
+	const body_str = fn_str
+		.slice(fn_str.indexOf("{") + 1, fn_str.lastIndexOf("}"))
+		// remove trailing whitespace
+		.trimEnd()
+		// remove empty lines
+		.replace(/^([\s\t]*$\r?\n)+/gm, "")
+		// use spaces uniformly: current indentStyle is "tab",and tab-width == 2(spaces)
+		.replace(/^\t+/gm, (tabs) => " ".repeat(tabs.length * tabSize));
+	/// remove indent
+	const indent = body_str.match(/\s+/)?.[0];
+	if (!indent) {
+		return body_str.trim();
+	}
+	const indent_reg = new RegExp(`^\\s{${indent.length}}`, "gm");
+	return body_str.replace(indent_reg, "");
+};
 // https://github.com/explodingcamera/esm/issues/1
 describe("handle key value pairs correctly", () => {
-	it("should minify html", async () => {
-		const source = `const css = css\`:host{\${"color"}: \${"red"}}\``;
-		expect((await minifyHTMLLiterals(source))?.code).toMatch('const css = css`:host{${"color"}:${"red"}}`');
+	it("should minify css", async () => {
+		const source = fn_body((css = String.raw) => {
+			const cssText = css`:host{
+				${"color"}: ${"red"};
+			}`;
+		});
+
+		expect((await minifyHTMLLiterals(source))?.code).toMatch(
+			fn_body((css = String.raw) => {
+				const cssText = css`:host{${"color"}:${"red"}}`;
+			}),
+		);
+	});
+
+	it("should minify css with unit", async () => {
+		const source = fn_body((css = String.raw) => {
+			const cssText = css`:host{
+				${"width"}: ${10}px;
+			}`;
+		});
+
+		expect((await minifyHTMLLiterals(source))?.code).toMatch(
+			fn_body((css = String.raw) => {
+				const cssText = css`:host{${"width"}:${10}px}`;
+			}),
+		);
+	});
+	it("should minify css within css-function", async () => {
+		const source = fn_body((css = String.raw) => {
+			const cssText = css`:host{
+				${"width"}: calc(${10}px + ${"var(--data)"});
+			}`;
+		});
+
+		expect((await minifyHTMLLiterals(source))?.code).toMatch(
+			fn_body((css = String.raw) => {
+				const cssText = css`:host{${"width"}:calc(${10}px + ${"var(--data)"})}`;
+			}),
+		);
 	});
 });
 

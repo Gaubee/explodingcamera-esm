@@ -210,9 +210,13 @@ export function defaultShouldMinifyCSS(template: Template) {
  */
 export const defaultValidation: Validation = {
 	ensurePlaceholderValid(placeholder) {
-		if (typeof placeholder !== "string" || !placeholder.length) {
-			throw new Error("getPlaceholder() must return a non-empty string");
+		if (typeof placeholder === "string" && placeholder.length > 0) {
+			return;
 		}
+		if (Array.isArray(placeholder) && placeholder.every((ph) => ph.length > 0)) {
+			return;
+		}
+		throw new Error("getPlaceholder() must return a non-empty string | string[]");
 	},
 	ensureHTMLPartsValid(parts, htmlParts) {
 		if (parts.length !== htmlParts.length) {
@@ -291,7 +295,7 @@ export async function minifyHTMLLiterals(source: string, options: Options = {}):
 
 		if (!(minifyHTML || minifyCSS)) return;
 
-		const placeholder = strategy.getPlaceholder(template.parts);
+		const placeholder = strategy.getPlaceholder(template.parts, template.tag);
 		if (validate) {
 			validate.ensurePlaceholderValid(placeholder);
 		}

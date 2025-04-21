@@ -26,10 +26,12 @@ describe("strategy", () => {
 			});
 
 			it('should append "_" if placeholder exists in templates', () => {
-				const regularPlaceholder = defaultStrategy.getPlaceholder(parts);
+				const regularPlaceholder = defaultStrategy.getPlaceholder(parts) as string;
+				expect(regularPlaceholder).toBeTypeOf("string");
 				const oneUnderscore = defaultStrategy.getPlaceholder([
 					{ text: regularPlaceholder, start: 0, end: regularPlaceholder.length },
-				]);
+				]) as string;
+				expect(oneUnderscore).toBeTypeOf("string");
 
 				expect(oneUnderscore).not.toEqual(regularPlaceholder);
 				expect(oneUnderscore.includes("_")).toEqual(true);
@@ -53,7 +55,8 @@ describe("strategy", () => {
 			});
 
 			it("should return a value that is preserved by html-minifier when splitting", async () => {
-				const placeholder = defaultStrategy.getPlaceholder(parts);
+				const placeholder = defaultStrategy.getPlaceholder(parts) as string;
+				expect(placeholder).toBeTypeOf("string");
 				const minHtml = await defaultStrategy.minifyHTML(
 					`
           <style>
